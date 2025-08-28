@@ -22,6 +22,13 @@ class UploadResponse(BaseModel):
     documentos_processados: int
     chunks_criados: int
 
+class FileUploadResponse(BaseModel):
+    mensagem: str
+    nome_arquivo: str
+    tamanho: int
+    tipo: str
+    status: str
+
 class HealthResponse(BaseModel):
     status: str
     chroma_status: str

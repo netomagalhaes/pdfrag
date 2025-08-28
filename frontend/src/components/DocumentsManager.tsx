@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +30,8 @@ export const DocumentsManager = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
 
   const fetchStatus = async () => {
@@ -75,15 +77,80 @@ export const DocumentsManager = () => {
         const errorData = await response.json();
         throw new Error(errorData.detail || `Erro ${response.status}`);
       }
-    } catch (error: any) {
-      console.error("Erro ao processar documentos:", error);
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error("Erro ao processar documentos:", err);
       toast({
         title: "Erro no processamento",
-        description: error.message || "Não foi possível processar os documentos.",
+        description: err.message || "Não foi possível processar os documentos.",
         variant: "destructive",
       });
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // Corrigido: tratamento especial para erro 404 e mensagens mais claras
+  const uploadAndProcessFile = async (file: File) => {
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("http://localhost:8000/documents/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        toast({
+          title: "Upload realizado!",
+          description: data.message || "Arquivo enviado e será processado.",
+        });
+        // Atualiza status após um tempo
+        setTimeout(() => {
+          fetchStatus();
+        }, 2000);
+      } else {
+        // Tenta extrair mensagem de erro do backend, mas trata 404 de forma especial
+        let errorMsg = "";
+        try {
+          const errorData = await response.json();
+          errorMsg = errorData.detail || `Erro ${response.status}`;
+        } catch {
+          if (response.status === 404) {
+            errorMsg = "Endpoint de upload não encontrado (404). Verifique se o backend está rodando e se a rota /documents/upload existe.";
+          } else {
+            errorMsg = `Erro ${response.status}`;
+          }
+        }
+        throw new Error(errorMsg);
+      }
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error("Erro ao enviar arquivo:", err);
+      let descricao = err.message;
+      if (descricao.includes("Not Found") || descricao.includes("404")) {
+        descricao = "Não foi possível encontrar o endpoint de upload no backend. Verifique se o backend está rodando e se a rota /documents/upload está implementada.";
+      }
+      toast({
+        title: "Erro no upload",
+        description: descricao || "Não foi possível enviar o arquivo.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      uploadAndProcessFile(file);
     }
   };
 
@@ -105,11 +172,12 @@ export const DocumentsManager = () => {
         const errorData = await response.json();
         throw new Error(errorData.detail || `Erro ${response.status}`);
       }
-    } catch (error: any) {
-      console.error("Erro ao limpar documentos:", error);
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error("Erro ao limpar documentos:", err);
       toast({
         title: "Erro ao limpar",
-        description: error.message || "Não foi possível limpar o banco.",
+        description: err.message || "Não foi possível limpar o banco.",
         variant: "destructive",
       });
     } finally {
@@ -227,21 +295,44 @@ export const DocumentsManager = () => {
               <div>
                 <h3 className="font-medium text-foreground">Processar Documentos</h3>
                 <p className="text-sm text-muted-foreground">
-                  Processa todos os PDFs da pasta base/ e adiciona ao banco vetorial
+                  Processa todos os PDFs da pasta base/ e adiciona ao banco vetorial<br />
+                  <span className="block mt-1">Ou envie um novo arquivo PDF para ser processado imediatamente.</span>
                 </p>
               </div>
-              <Button 
-                onClick={processDocuments}
-                disabled={isProcessing}
-                className="bg-gradient-primary hover:opacity-90 transition-opacity gap-2"
-              >
-                {isProcessing ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Upload className="w-4 h-4" />
-                )}
-                {isProcessing ? "Processando..." : "Processar"}
-              </Button>
+              <div className="flex gap-2">
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  ref={fileInputRef}
+                  style={{ display: "none" }}
+                  onChange={handleFileChange}
+                  disabled={isUploading}
+                />
+                <Button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="bg-gradient-primary hover:opacity-90 transition-opacity gap-2"
+                >
+                  {isUploading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Upload className="w-4 h-4" />
+                  )}
+                  {isUploading ? "Enviando..." : "Enviar PDF"}
+                </Button>
+                <Button 
+                  onClick={processDocuments}
+                  disabled={isProcessing}
+                  className="bg-gradient-primary hover:opacity-90 transition-opacity gap-2"
+                >
+                  {isProcessing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Upload className="w-4 h-4" />
+                  )}
+                  {isProcessing ? "Processando..." : "Processar"}
+                </Button>
+              </div>
             </div>
 
             {/* Clear Database */}
@@ -301,7 +392,7 @@ export const DocumentsManager = () => {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="text-sm text-muted-foreground space-y-2">
-              <p>1. <strong>Adicione seus arquivos PDF</strong> na pasta <code className="bg-background px-1 rounded">base/</code> do backend</p>
+              <p>1. <strong>Adicione seus arquivos PDF</strong> na pasta <code className="bg-background px-1 rounded">base/</code> do backend ou envie diretamente pelo botão "Enviar PDF"</p>
               <p>2. <strong>Clique em "Processar"</strong> para extrair o texto e criar embeddings</p>
               <p>3. <strong>Use o Chat RAG</strong> para fazer perguntas sobre o conteúdo</p>
               <p>4. <strong>Ajuste Top-K e Threshold</strong> no chat para melhor precisão</p>
